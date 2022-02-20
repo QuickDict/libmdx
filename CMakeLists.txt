@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(mdict)
+project(libmdx)
 
 set(LIBMDX_SRCS
     mdx.h
