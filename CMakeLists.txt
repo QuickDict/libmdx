@@ -9,6 +9,10 @@ set(LIBMDX_SRCS
     ripemd128.c
 )
 
+find_package(LIBXML2 REQUIRED)
+include_directories(${LIBXML2_INCLUDE_DIRS})
+list(APPEND LIBMDX_LIBS ${LIBXML2_LIBRARIES})
+
 option(USE_ZLIB "Use zlib" ON)
 if(USE_ZLIB)
     find_package(ZLIB REQUIRED)

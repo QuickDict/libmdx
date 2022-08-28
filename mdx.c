@@ -2,6 +2,8 @@
 #include "cpu_ending.h"
 #include "ripemd128.h"
 #include <assert.h>
+#include <libxml/parser.h>
+#include <libxml/tree.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -43,19 +45,41 @@ MDX_RET mdx_init(FILE *fp, mdx_data *data)
         return MDX_FILE_ERROR;
     // TODO: check checksum
 
-    // TODO: parse property_str
+    xmlDoc *doc = xmlReadMemory(property_str, str_len, "dictionary", "UTF-16", 0);
+    if (NULL == doc) {
+        free(property_str);
+        return MDX_PARSE_ERROR;
+    }
+    xmlNode *node = xmlDocGetRootElement(doc);
+    xmlAttr *attr = node->properties;
+
+    data->header.creation_date = xmlGetProp(node, "CreationDate");
+    data->header.title = xmlGetProp(node, "Title");
+    data->header.description = xmlGetProp(node, "Description");
+    data->header.data_source_format = xmlGetProp(node, "DataSourceFormat");
+    data->header.style_sheet = xmlGetProp(node, "StyleSheet");
+    data->header.register_by = xmlGetProp(node, "RegisterBy");
+    data->header.reg_code = xmlGetProp(node, "RegCode");
+
+    char *encrypted_str = xmlGetProp(node, "Encrypted");
+    data->header.encrypted = atoi(encrypted_str);
+    xmlFree(encrypted_str);
+
+    char *generated_by_engine_version_str = xmlGetProp(node, "GeneratedByEngineVersion");
+    data->header.generated_by_engine_version = atof(generated_by_engine_version_str);
+    xmlFree(generated_by_engine_version_str);
+
+    char *required_engine_version_str = xmlGetProp(node, "RequiredEngineVersion");
+    data->header.required_engine_version = atof(required_engine_version_str);
+    xmlFree(required_engine_version_str);
+
+    char *encoding_str = xmlGetProp(node, "RequiredEngineVersion");
+    data->header.encoding = (strcasecmp(encoding_str, "UTF16") == 0) ? MDX_UTF16 : MDX_UTF8;
+    xmlFree(encoding_str);
+
     free(property_str);
-    data->header.creation_date = NULL;
-    data->header.title = NULL;
-    data->header.description = NULL;
-    data->header.data_source_format = NULL;
-    data->header.style_sheet = NULL;
-    data->header.register_by = NULL;
-    data->header.reg_code = NULL;
-    data->header.encrypted = 2;
-    data->header.generated_by_engine_version = 2.0;
-    data->header.required_engine_version = 2.0;
-    data->header.encoding = MDX_UTF8;
+    xmlFreeDoc(doc);
+    xmlCleanupParser();
 
     data->keyword.offset = ftell(fp);
     data->keyword.keywords = NULL;
@@ -84,31 +108,31 @@ MDX_RET mdx_init(FILE *fp, mdx_data *data)
 MDX_RET mdx_free(mdx_data *data)
 {
     if (data->header.creation_date != NULL) {
-        free(data->header.creation_date);
+        xmlFree(data->header.creation_date);
         data->header.creation_date = NULL;
     }
     if (data->header.title != NULL) {
-        free(data->header.title);
+        xmlFree(data->header.title);
         data->header.title = NULL;
     }
     if (data->header.description != NULL) {
-        free(data->header.description);
+        xmlFree(data->header.description);
         data->header.description = NULL;
     }
     if (data->header.data_source_format != NULL) {
-        free(data->header.data_source_format);
+        xmlFree(data->header.data_source_format);
         data->header.data_source_format = NULL;
     }
     if (data->header.style_sheet != NULL) {
-        free(data->header.style_sheet);
+        xmlFree(data->header.style_sheet);
         data->header.style_sheet = NULL;
     }
     if (data->header.register_by != NULL) {
-        free(data->header.register_by);
+        xmlFree(data->header.register_by);
         data->header.register_by = NULL;
     }
     if (data->header.reg_code != NULL) {
-        free(data->header.reg_code);
+        xmlFree(data->header.reg_code);
         data->header.reg_code = NULL;
     }
 
