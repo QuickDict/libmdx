@@ -33,6 +33,11 @@ typedef enum {
 } MDX_ENCODING_TYPE;
 
 typedef enum {
+    MDX_ENCRYPT_HEADER = 1,
+    MDX_ENCRYPT_INDEX = 1 << 1,
+} MDX_ENCRYPT_TYPE;
+
+typedef enum {
     MDX_Html = 0,
     MDX_Text,
 } MDX_FORMAT;

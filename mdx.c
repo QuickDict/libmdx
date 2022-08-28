@@ -43,7 +43,11 @@ MDX_RET mdx_init(FILE *fp, mdx_data *data)
     uint32_t checksum;
     if (fread(&checksum, sizeof(checksum), 1, fp) == 0)
         return MDX_FILE_ERROR;
-    // TODO: check checksum
+    uint32_t calc = adler32(1, (const unsigned char *) property_str, str_len);
+    if (calc != checksum) {
+        free(property_str);
+        return MDX_CHECKSUM_ERROR;
+    }
 
     xmlDoc *doc = xmlReadMemory(property_str, str_len, "dictionary", "UTF-16", 0);
     if (NULL == doc) {
@@ -74,7 +78,9 @@ MDX_RET mdx_init(FILE *fp, mdx_data *data)
     xmlFree(required_engine_version_str);
 
     char *encoding_str = xmlGetProp(node, "RequiredEngineVersion");
-    data->header.encoding = (strcasecmp(encoding_str, "UTF16") == 0) ? MDX_UTF16 : MDX_UTF8;
+    data->header.encoding = (strcasecmp(encoding_str, "UTF-16") == 0 || strcasecmp(encoding_str, "UTF16") == 0)
+                                ? MDX_UTF16
+                                : MDX_UTF8;
     xmlFree(encoding_str);
 
     free(property_str);
@@ -86,6 +92,9 @@ MDX_RET mdx_init(FILE *fp, mdx_data *data)
     data->keyword.record_offsets = NULL;
 
     // TODO: possibly encrypted!
+    if (data->header.encrypted & MDX_ENCRYPT_HEADER)
+        return MDX_DECRYPT_ERROR;
+
     fseek(fp, 8 + 8 + 8, SEEK_CUR);
     uint64_t indexes_compressed_length;
     uint64_t block_compressed_length;
@@ -146,47 +155,40 @@ MDX_RET mdx_parse_keyword_indexes(FILE *fp, mdx_data *data)
 {
     fseek(fp, data->keyword.offset, SEEK_SET);
 
-    if (fread(&data->keyword.num_blocks, sizeof(data->keyword.num_blocks), 1, fp) == 0)
+    uint32_t buf_len = sizeof(uint64_t) * 5 + sizeof(uint32_t);
+    unsigned char *buf = (unsigned char *) malloc(buf_len);
+    if (fread(buf, buf_len, 1, fp) == 0)
         return MDX_FILE_ERROR;
-    data->keyword.num_blocks = SWAPINT64(data->keyword.num_blocks);
 
-    if (fread(&data->keyword.num_total_entries, sizeof(data->keyword.num_total_entries), 1, fp) == 0)
-        return MDX_FILE_ERROR;
-    data->keyword.num_total_entries = SWAPINT64(data->keyword.num_total_entries);
+    data->keyword.num_blocks = SWAPINT64(*((uint64_t *) buf + 0));
+    data->keyword.num_total_entries = SWAPINT64(*((uint64_t *) buf + 1));
+    uint64_t indexes_uncompressed_length = SWAPINT64(*((uint64_t *) buf + 2));
+    uint64_t indexes_compressed_length = SWAPINT64(*((uint64_t *) buf + 3));
+    uint64_t block_length = SWAPINT64(*((uint64_t *) buf + 4));
+    uint32_t checksum = SWAPINT32(*(uint32_t *) (buf + buf_len - 4));
 
-    uint64_t indexes_uncompressed_length;
-    if (fread(&indexes_uncompressed_length, sizeof(indexes_uncompressed_length), 1, fp) == 0)
-        return MDX_FILE_ERROR;
-    indexes_uncompressed_length = SWAPINT64(indexes_uncompressed_length);
-
-    uint64_t indexes_compressed_length;
-    if (fread(&indexes_compressed_length, sizeof(indexes_compressed_length), 1, fp) == 0)
-        return MDX_FILE_ERROR;
-    indexes_compressed_length = SWAPINT64(indexes_compressed_length);
-
-    uint64_t block_length;
-    if (fread(&block_length, sizeof(block_length), 1, fp) == 0)
-        return MDX_FILE_ERROR;
-    block_length = SWAPINT64(block_length);
-
-    uint32_t checksum;
-    if (fread(&checksum, sizeof(checksum), 1, fp) == 0)
-        return MDX_FILE_ERROR;
-    checksum = SWAPINT32(checksum);
+    uint32_t calc = adler32(1, (const unsigned char *) buf, buf_len - 4);
+    free(buf);
+    if (calc != checksum)
+        return MDX_CHECKSUM_ERROR;
 
     unsigned char *indexes_compressed = (unsigned char *) malloc(indexes_compressed_length);
     if (indexes_compressed == NULL)
         return MDX_MALLOC_ERROR;
     if (fread(indexes_compressed, indexes_compressed_length, 1, fp) == 0)
         return MDX_FILE_ERROR;
-    if (data->header.encrypted & 0x2) {
+    uint32_t uncompressed_checksum = *(uint32_t *) (indexes_compressed + 4);
+    uncompressed_checksum = SWAPINT32(uncompressed_checksum);
+    if (data->header.encrypted & MDX_ENCRYPT_INDEX) {
         MDX_RET ret = mdx_decrypt_indexes(indexes_compressed, indexes_compressed_length);
         if (ret != MDX_NO_ERROR)
             return ret;
     }
     unsigned char *indexes_uncompressed = (unsigned char *) malloc(indexes_uncompressed_length);
-    if (indexes_uncompressed == NULL)
+    if (indexes_uncompressed == NULL) {
+        free(indexes_compressed);
         return MDX_MALLOC_ERROR;
+    }
     if (uncompress(indexes_uncompressed,
                    &indexes_uncompressed_length,
                    indexes_compressed + 8,
@@ -197,6 +199,13 @@ MDX_RET mdx_parse_keyword_indexes(FILE *fp, mdx_data *data)
         return MDX_UNCOMPRESS_ERROR;
     }
     free(indexes_compressed);
+
+    // checksum of uncompressed data
+    uint32_t uncompressed_calc = adler32(1, (const unsigned char *) indexes_uncompressed, indexes_uncompressed_length);
+    if (uncompressed_calc != uncompressed_checksum) {
+        free(indexes_uncompressed);
+        return MDX_CHECKSUM_ERROR;
+    }
 
     size_t byte_count = 0;
     size_t block = 0;
