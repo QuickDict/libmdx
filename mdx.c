@@ -14,6 +14,10 @@
 #include <zlib.h>
 #endif
 
+#ifdef _MSC_VER
+#define strcasecmp stricmp
+#endif
+
 static const char *MDX_ERROR_STRING[] = {
     "No error",
     "Malloc error",
